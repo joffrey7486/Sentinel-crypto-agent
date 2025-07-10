@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "sentinel-crypto-agent"
+version = "0.1.0"
+description = "CLI tool to analyze crypto pairs and generate buy/sell signals with adaptive trailing stops based on multiple strategies"
+authors = ["Joffrey C <jocau.lab@gmail.com>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pandas = "^2.2.0"
+numpy = "^1.26.0"
+ccxt = "^4.2.0"
+TA-Lib = {version = "^0.4.28", extras = ["binary"]}
+scipy = "^1.11.0"
+pyyaml = "^6.0.1"
+
+[tool.poetry.dev-dependencies]
+pytest = "^8.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.5.0"]
+build-backend = "poetry.core.masonry.api"

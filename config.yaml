@@ -1,0 +1,17 @@
+# Sentinel Crypto Agent configuration file
+default_pair: BTC/USDC
+exchange: binance
+strategies:
+  - EMA20_100
+  - Donchian20
+  - BollingerSqueeze
+  - IchimokuKumo
+  - MACDZeroCross
+  - VWAPPullback
+  - KeltnerUpperRide
+  - SMA50Pullback
+  - SARFlip
+  - RSIDivergence
+fees: 0.0005  # 0.05%
+slippage: 0.0005
+position_size_pct: 0.01  # 1% capital
