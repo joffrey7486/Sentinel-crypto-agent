@@ -11,6 +11,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Type
+import os
+import json
 
 import ccxt
 import pandas as pd
@@ -42,11 +44,19 @@ class Engine:
         timeframe: str = "4h",
     ) -> None:
         self.config = self._load_config(config_path)
-        self.exchange = getattr(ccxt, exchange_id)()
+        api_key = os.getenv("API_KEY")
+        api_secret = os.getenv("API_SECRET")
+        self.exchange = getattr(ccxt, exchange_id)({
+            "apiKey": api_key,
+            "secret": api_secret,
+            "enableRateLimit": True,
+        })
         self.exchange.load_markets()
         self.timeframe = timeframe
         self.strategies: List[Type[StrategyBase]] = []
         self.instrument_lock: Dict[str, str] = {}  # pair -> strategy_name
+        self.positions_path = Path("positions.json")
+        self.positions: List[Dict[str, str]] = self._load_positions()
 
     @staticmethod
     def _load_config(path: Path) -> dict:
@@ -58,6 +68,40 @@ class Engine:
 
     def register_strategy(self, strategy_cls: Type[StrategyBase]) -> None:
         self.strategies.append(strategy_cls)
+
+    def _load_positions(self) -> List[Dict[str, str]]:
+        if self.positions_path.exists():
+            with open(self.positions_path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        return []
+
+    def _save_positions(self) -> None:
+        with open(self.positions_path, "w", encoding="utf-8") as fh:
+            json.dump(self.positions, fh, indent=2)
+
+    def _send_order(self, symbol: str, side: str, price: float) -> None:
+        size_pct = float(self.config.get("position_size_pct", 0.01))
+        balance = self.exchange.fetch_balance()
+        base = symbol.split("/")[0]
+        quote = symbol.split("/")[1]
+        avail = balance.get(quote, {}).get("free")
+        if avail:
+            amount = (avail * size_pct) / price
+        else:
+            amount = 0
+        try:
+            order = self.exchange.create_order(symbol, "market", side, amount)
+        except Exception as exc:  # pragma: no cover - network errors
+            logger.error("Order failed: %s", exc)
+            order = {"error": str(exc)}
+        self.positions.append({
+            "time": datetime.utcnow().isoformat(),
+            "symbol": symbol,
+            "side": side,
+            "amount": amount,
+            "price": price,
+            "order": order,
+        })
 
     def fetch_ohlcv(self, symbol: str, limit: int = 2000) -> pd.DataFrame:
         logger.info("Fetching OHLCV for %s", symbol)
@@ -96,9 +140,9 @@ class Engine:
                 signal.action.upper(),
                 signal.stop_distance or 0.0,
             )
-            # lock instrument
             self.instrument_lock[symbol] = strat_cls.name
-            # Here: push order / record trade. For MVP we just log.
+            self._send_order(symbol, signal.action, price)
+            self._save_positions()
             break  # Only first strategy acts this tick.
 
 
