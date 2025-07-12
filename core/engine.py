@@ -120,7 +120,6 @@ class Engine:
                 for pos in data:
                     pos.setdefault("status", "closed")
                     pos.setdefault("stop_price", None)
-                    pos.setdefault("atr_multiplier", None)
                     pos.setdefault("armed", False)
                 return data
         return []
@@ -170,12 +169,9 @@ class Engine:
             order = {"error": str(exc)}
 
         stop_price = None
-        atr_mult = None
-        if stop_distance is not None and atr_value:
+        if stop_distance is not None:
             direction = 1 if side == "long" else -1
             stop_price = price - direction * stop_distance
-            if atr_value:
-                atr_mult = stop_distance / atr_value
 
         self.positions.append(
             {
@@ -187,7 +183,6 @@ class Engine:
                 "order": order,
                 "status": "open",
                 "stop_price": stop_price,
-                "atr_multiplier": atr_mult,
                 "armed": False,
             }
         )
@@ -216,11 +211,10 @@ class Engine:
             if pos.get("status") != "open":
                 continue
             stop = pos.get("stop_price")
-            atr_mult = pos.get("atr_multiplier")
             side = pos["side"]
             entry = float(pos["price"])
             armed = pos.get("armed", False)
-            if stop is None or atr_mult is None:
+            if stop is None:
                 continue
 
             if not armed:
@@ -236,14 +230,8 @@ class Engine:
                     )
                 continue
 
-            atr_key = "ATR_20" if "ATR_20" in extras else "ATR_14"
-            atr_series = extras.get(atr_key)
-            if atr_series is None:
-                continue
-            atr_value = float(atr_series.iloc[-2])
-
             if side == "long":
-                candidate = high_prev - atr_mult * atr_value
+                candidate = high_prev * (1 - 0.008)
                 old = pos["stop_price"]
                 pos["stop_price"] = max(old, candidate)
                 if pos["stop_price"] != old:
@@ -253,7 +241,7 @@ class Engine:
                 if last_close <= pos["stop_price"]:
                     self._close_position(pos["symbol"], last_close)
             else:
-                candidate = low_prev + atr_mult * atr_value
+                candidate = low_prev * (1 + 0.008)
                 old = pos["stop_price"]
                 pos["stop_price"] = min(old, candidate)
                 if pos["stop_price"] != old:

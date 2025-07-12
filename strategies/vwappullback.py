@@ -16,17 +16,20 @@ class VWAPPullback(BaseStrategy):
             return Signal("flat")
         vwap = compute_vwap(df)
         close = df["Close"]
+        open_ = df["Open"]
+
         prev_close = close.iloc[-2]
         curr_close = close.iloc[-1]
         prev_above = prev_close > vwap.iloc[-2]
         curr_above = curr_close > vwap.iloc[-1]
+        is_green = curr_close > open_.iloc[-1]
+
         action = "flat"
-        if not prev_above and curr_above:
+        if not prev_above and curr_above and is_green:
             action = "long"
-        elif prev_above and not curr_above:
+        elif prev_above and not curr_above and not is_green:
             action = "short"
-        atr14 = extras.get("ATR_14")
-        stop = None
-        if atr14 is not None:
-            stop = float(atr14.iloc[-1])
+
+        price = float(curr_close)
+        stop = 0.008 * price
         return Signal(action, stop_distance=stop)
