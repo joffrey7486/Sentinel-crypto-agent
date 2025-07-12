@@ -4,6 +4,7 @@ This module fetches OHLCV data every 4h, computes indicators once, and asks each
 registered strategy for a signal. It then decides whether to act, respecting the
 instrument-lock and logs the decision.
 """
+
 from __future__ import annotations
 
 import logging
@@ -31,7 +32,9 @@ class StrategyBase:
     name: str = "base"
 
     @classmethod
-    def generate_signal(cls, df: pd.DataFrame, extras: Dict[str, pd.Series]) -> Signal:  # noqa: D401  # type: ignore
+    def generate_signal(
+        cls, df: pd.DataFrame, extras: Dict[str, pd.Series]
+    ) -> Signal:  # noqa: D401  # type: ignore
         """Return trading signal for the last closed candle."""
         raise NotImplementedError
 
@@ -46,17 +49,21 @@ class Engine:
         self.config = self._load_config(config_path)
         api_key = os.getenv("API_KEY")
         api_secret = os.getenv("API_SECRET")
-        self.exchange = getattr(ccxt, exchange_id)({
-            "apiKey": api_key,
-            "secret": api_secret,
-            "enableRateLimit": True,
-        })
+        self.exchange = getattr(ccxt, exchange_id)(
+            {
+                "apiKey": api_key,
+                "secret": api_secret,
+                "enableRateLimit": True,
+            }
+        )
         self.exchange.load_markets()
         self.timeframe = timeframe
         self.strategies: List[Type[StrategyBase]] = []
         self.instrument_lock: Dict[str, str] = {}  # pair -> strategy_name
         self.positions_path = Path("positions.json")
         self.positions: List[Dict[str, str]] = self._load_positions()
+
+        self.delta_be = float(self.config.get("delta_be", 0.0015))
 
     @staticmethod
     def _load_config(path: Path) -> dict:
@@ -93,6 +100,9 @@ class Engine:
                 data = json.load(fh)
                 for pos in data:
                     pos.setdefault("status", "closed")
+                    pos.setdefault("stop_price", None)
+                    pos.setdefault("atr_multiplier", None)
+                    pos.setdefault("armed", False)
                 return data
         return []
 
@@ -100,7 +110,14 @@ class Engine:
         with open(self.positions_path, "w", encoding="utf-8") as fh:
             json.dump(self.positions, fh, indent=2)
 
-    def _send_order(self, symbol: str, side: str, price: float) -> None:
+    def _send_order(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        stop_distance: float | None,
+        atr_value: float | None,
+    ) -> None:
         """Send a market order to the exchange and persist it.
 
         Parameters
@@ -128,7 +145,9 @@ class Engine:
             amount = 0
 
         if not amount:
-            logger.warning("Skipping order for %s, computed amount is %s", symbol, amount)
+            logger.warning(
+                "Skipping order for %s, computed amount is %s", symbol, amount
+            )
             return
 
         # CCXT expects 'buy' or 'sell'; map our signal sides accordingly
@@ -139,22 +158,85 @@ class Engine:
         except Exception as exc:  # pragma: no cover - network errors
             logger.error("Order failed: %s", exc)
             order = {"error": str(exc)}
-        self.positions.append({
-            "time": datetime.utcnow().isoformat(),
-            "symbol": symbol,
-            "side": side,
-            "amount": amount,
-            "price": price,
-            "order": order,
-            "status": "open",
-        })
+
+        stop_price = None
+        atr_mult = None
+        if stop_distance is not None and atr_value:
+            direction = 1 if side == "long" else -1
+            stop_price = price - direction * stop_distance
+            if atr_value:
+                atr_mult = stop_distance / atr_value
+
+        self.positions.append(
+            {
+                "time": datetime.utcnow().isoformat(),
+                "symbol": symbol,
+                "side": side,
+                "amount": amount,
+                "price": price,
+                "order": order,
+                "status": "open",
+                "stop_price": stop_price,
+                "atr_multiplier": atr_mult,
+                "armed": False,
+            }
+        )
 
     def fetch_ohlcv(self, symbol: str, limit: int = 2000) -> pd.DataFrame:
         logger.info("Fetching OHLCV for %s", symbol)
         ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe=self.timeframe, limit=limit)
-        df = pd.DataFrame(ohlcv, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume"])
+        df = pd.DataFrame(
+            ohlcv, columns=["Timestamp", "Open", "High", "Low", "Close", "Volume"]
+        )
         df["Timestamp"] = pd.to_datetime(df["Timestamp"], unit="ms", utc=True)
         return df.set_index("Timestamp")
+
+    def _update_open_positions(
+        self, df: pd.DataFrame, extras: Dict[str, pd.Series]
+    ) -> None:
+        """Update trailing stops for all open positions and close if hit."""
+        if not self.positions:
+            return
+
+        last_close = float(df.iloc[-1]["Close"])
+        high_prev = float(df.iloc[-2]["High"])
+        low_prev = float(df.iloc[-2]["Low"])
+
+        for pos in self.positions:
+            if pos.get("status") != "open":
+                continue
+            stop = pos.get("stop_price")
+            atr_mult = pos.get("atr_multiplier")
+            side = pos["side"]
+            entry = float(pos["price"])
+            armed = pos.get("armed", False)
+            if stop is None or atr_mult is None:
+                continue
+
+            if not armed:
+                move = abs(last_close - entry) / entry
+                if move >= self.delta_be:
+                    direction = 1 if side == "long" else -1
+                    pos["stop_price"] = entry + direction * entry * self.delta_be
+                    pos["armed"] = True
+                continue
+
+            atr_key = "ATR_20" if "ATR_20" in extras else "ATR_14"
+            atr_series = extras.get(atr_key)
+            if atr_series is None:
+                continue
+            atr_value = float(atr_series.iloc[-2])
+
+            if side == "long":
+                candidate = high_prev - atr_mult * atr_value
+                pos["stop_price"] = max(pos["stop_price"], candidate)
+                if last_close <= pos["stop_price"]:
+                    self._close_position(pos["symbol"], last_close)
+            else:
+                candidate = low_prev + atr_mult * atr_value
+                pos["stop_price"] = min(pos["stop_price"], candidate)
+                if last_close >= pos["stop_price"]:
+                    self._close_position(pos["symbol"], last_close)
 
     def run_once(self, symbol: str, df: Optional[pd.DataFrame] = None) -> None:
         if df is None:
@@ -172,28 +254,46 @@ class Engine:
         price = float(last_candle["Close"])
         time = last_candle.name.tz_convert(timezone.utc)
 
+        # update existing position stops first
+        self._update_open_positions(df, extras)
+        self._save_positions()
+
+        if self._get_open_position(symbol) is not None:
+            return
+
+        # gather signals from all strategies
+        signals = {}
         for strat_cls in self.strategies:
-            # skip if instrument locked by another strategy
-            if symbol in self.instrument_lock and self.instrument_lock[symbol] != strat_cls.name:
-                continue
             signal = strat_cls.generate_signal(df, extras)
-            if signal.action == "flat":
-                # if we were previously in a position with this strategy, close it
-                if self.instrument_lock.get(symbol) == strat_cls.name:
-                    self._close_position(symbol, price)
-                    self._save_positions()
-                continue
-            logger.info(
-                "%s %s -> %s stop_distance=%.4f",
-                time,
-                symbol,
-                signal.action.upper(),
-                signal.stop_distance or 0.0,
-            )
-            self.instrument_lock[symbol] = strat_cls.name
-            self._send_order(symbol, signal.action, price)
+            if signal.action != "flat":
+                signals[strat_cls.name] = signal
+
+        long_names = [n for n, s in signals.items() if s.action == "long"]
+        short_names = [n for n, s in signals.items() if s.action == "short"]
+        top_names = {"EMA20_100", "Donchian20", "BollingerSqueeze"}
+
+        def has_top(name_list: list[str]) -> bool:
+            return any(n in top_names for n in name_list)
+
+        chosen = None
+        if len(long_names) >= 3 and has_top(long_names):
+            chosen_sig = signals[long_names[0]]
+            chosen = ("long", chosen_sig)
+        elif len(short_names) >= 3 and has_top(short_names):
+            chosen_sig = signals[short_names[0]]
+            chosen = ("short", chosen_sig)
+
+        if chosen:
+            side, ref_signal = chosen
+            logger.info("%s %s consensus %s", time, symbol, side.upper())
+            atr_value = None
+            if ref_signal.stop_distance is not None:
+                if "ATR_20" in extras:
+                    atr_value = float(extras["ATR_20"].iloc[-1])
+                elif "ATR_14" in extras:
+                    atr_value = float(extras["ATR_14"].iloc[-1])
+            self._send_order(symbol, side, price, ref_signal.stop_distance, atr_value)
             self._save_positions()
-            break  # Only first strategy acts this tick.
 
 
 if __name__ == "__main__":  # pragma: no cover
