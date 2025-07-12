@@ -14,16 +14,29 @@ class MACDZeroCross(BaseStrategy):
     def generate_signal(cls, df: pd.DataFrame, extras: dict[str, pd.Series]):  # type: ignore
         if len(df) < 35:
             return Signal("flat")
-        _, _, hist = compute_macd(df["Close"])
-        prev = hist.iloc[-2]
-        curr = hist.iloc[-1]
+        macd, signal, hist = compute_macd(df["Close"])
+        prev_hist = hist.iloc[-2]
+        curr_hist = hist.iloc[-1]
+        curr_macd = macd.iloc[-1]
+        curr_signal = signal.iloc[-1]
+
         action = "flat"
-        if prev < 0 <= curr:
+        if (
+            prev_hist < 0 <= curr_hist
+            and curr_hist > prev_hist
+            and curr_macd > curr_signal
+        ):
             action = "long"
-        elif prev > 0 >= curr:
+        elif (
+            prev_hist > 0 >= curr_hist
+            and curr_hist < prev_hist
+            and curr_macd < curr_signal
+        ):
             action = "short"
+
         atr14 = extras.get("ATR_14")
         stop = None
         if atr14 is not None:
-            stop = float(atr14.iloc[-1])
+            stop = 2.0 * float(atr14.iloc[-1])
+
         return Signal(action, stop_distance=stop)
