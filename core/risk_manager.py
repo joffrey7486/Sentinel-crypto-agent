@@ -11,7 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 class RiskManager:
-    """Simple risk management engine implementing multiple rules."""
+    """Simple risk management engine implementing multiple rules.
+
+    The manager keeps track of equity and daily P&L to enforce risk limits such
+    as maximum exposure, daily loss limits and overall drawdown. Position sizing
+    is based on the distance to the stop using ATR.
+    """
 
     def __init__(self, config_path: Path = Path("risk.yml")) -> None:
         self.config = self._load_config(config_path)
@@ -24,6 +29,7 @@ class RiskManager:
         self.mdd_triggered = False
         self.drawdown_recovery: float | None = None
         self.last_heartbeat = datetime.now(timezone.utc)
+        self.last_day = self.last_heartbeat.date()
         self.log_path = Path("risk_events.log")
 
     @staticmethod
@@ -54,16 +60,25 @@ class RiskManager:
         self.equity_high = max(self.equity_high, self.equity)
 
     def record_heartbeat(self) -> None:
-        self.last_heartbeat = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        self.last_heartbeat = now
+        if now.date() != self.last_day:
+            self.new_day()
+            self.last_day = now.date()
 
     # --- Rules -----------------------------------------------------------
     def risk_per_trade(self, stop_distance: float) -> float:
-        pct = float(self.config.get("risk_per_trade_pct", 0.01))
+        """Return trade size based on ATR stop distance and risk settings."""
+
+        pct = float(
+            self.config.get("risk_per_trade", self.config.get("risk_per_trade_pct", 0.01))
+        )
         if self.loss_streak >= int(self.config.get("loss_streak_limit", 4)):
             pct *= 0.5
         capital = self.equity
         if capital <= 0 or stop_distance <= 0:
             return 0.0
+        # size = equity * risk_per_trade / ATR stop distance
         return (capital * pct) / stop_distance
 
     def exposure_ok(self, open_value: float, new_value: float) -> bool:
@@ -76,14 +91,14 @@ class RiskManager:
     def daily_loss_ok(self) -> bool:
         if self.pause_until and datetime.now(timezone.utc) < self.pause_until:
             return False
-        limit_pct = float(self.config.get("daily_loss_limit_pct", 0.02))
+        limit_pct = float(self.config.get("daily_loss_limit", self.config.get("daily_loss_limit_pct", 0.02)))
         if self.daily_pnl <= -self.daily_start_equity * limit_pct:
             self.pause_until = datetime.now(timezone.utc) + timedelta(hours=24)
             return False
         return True
 
     def drawdown_ok(self) -> bool:
-        limit_pct = float(self.config.get("max_drawdown_pct", 0.1))
+        limit_pct = float(self.config.get("max_drawdown", self.config.get("max_drawdown_pct", 0.1)))
         if self.equity_high == 0:
             return True
         drop = (self.equity_high - self.equity) / self.equity_high
