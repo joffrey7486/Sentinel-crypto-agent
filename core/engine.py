@@ -69,10 +69,31 @@ class Engine:
     def register_strategy(self, strategy_cls: Type[StrategyBase]) -> None:
         self.strategies.append(strategy_cls)
 
+    def _get_open_position(self, symbol: str) -> Optional[Dict[str, str]]:
+        """Return the last open position for the given symbol, if any."""
+        for pos in reversed(self.positions):
+            if pos.get("symbol") == symbol and pos.get("status") == "open":
+                return pos
+        return None
+
+    def _close_position(self, symbol: str, price: float) -> None:
+        """Mark the latest open position for *symbol* as closed."""
+        pos = self._get_open_position(symbol)
+        if pos is None:
+            return
+        pos["status"] = "closed"
+        pos["close_time"] = datetime.utcnow().isoformat()
+        pos["close_price"] = price
+        # remove lock once position is closed
+        self.instrument_lock.pop(symbol, None)
+
     def _load_positions(self) -> List[Dict[str, str]]:
         if self.positions_path.exists():
             with open(self.positions_path, "r", encoding="utf-8") as fh:
-                return json.load(fh)
+                data = json.load(fh)
+                for pos in data:
+                    pos.setdefault("status", "closed")
+                return data
         return []
 
     def _save_positions(self) -> None:
@@ -92,6 +113,9 @@ class Engine:
         price: float
             Current market price used to size the position.
         """
+
+        # close any existing open position for this symbol
+        self._close_position(symbol, price)
 
         size_pct = float(self.config.get("position_size_pct", 0.01))
         balance = self.exchange.fetch_balance()
@@ -122,7 +146,10 @@ class Engine:
             "amount": amount,
             "price": price,
             "order": order,
+            "status": "open",
         })
+        # release the lock once order has been executed
+        self.instrument_lock.pop(symbol, None)
 
     def fetch_ohlcv(self, symbol: str, limit: int = 2000) -> pd.DataFrame:
         logger.info("Fetching OHLCV for %s", symbol)
@@ -153,6 +180,10 @@ class Engine:
                 continue
             signal = strat_cls.generate_signal(df, extras)
             if signal.action == "flat":
+                # if we were previously in a position with this strategy, close it
+                if self.instrument_lock.get(symbol) == strat_cls.name:
+                    self._close_position(symbol, price)
+                    self._save_positions()
                 continue
             logger.info(
                 "%s %s -> %s stop_distance=%.4f",
