@@ -2,7 +2,7 @@
 
 Entry LONG when EMA20 crosses above EMA100 on the last closed candle.
 Entry SHORT when EMA20 crosses below EMA100.
-Trailing stop initial distance = min(4% of price, 2.5 * ATR20).
+Trailing stop initial distance = max(4% of price, 2.5 * ATR20).
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ class EMA20_100(BaseStrategy):
         close = df["Close"]
         ema20 = compute_ema(close, 20)
         ema100 = compute_ema(close, 100)
+        ema200 = compute_ema(close, 200)
         diff = ema20 - ema100
 
         # Use last two closed candles to detect new crossing
@@ -34,7 +35,10 @@ class EMA20_100(BaseStrategy):
         if prev < 0 < curr:
             action = "long"
         elif prev > 0 > curr:
-            action = "short"
+            if close.iloc[-1] > ema200.iloc[-1]:
+                action = "flat"
+            else:
+                action = "short"
 
         if action == "flat":
             return Signal("flat")
@@ -44,5 +48,5 @@ class EMA20_100(BaseStrategy):
             return Signal("flat")
 
         price = float(close.iloc[-1])
-        stop_dist = min(0.04 * price, 2.5 * float(atr20.iloc[-1]))
+        stop_dist = max(0.04 * price, 2.5 * float(atr20.iloc[-1]))
         return Signal(action, stop_distance=stop_dist)
