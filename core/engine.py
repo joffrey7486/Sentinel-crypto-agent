@@ -19,6 +19,7 @@ import ccxt
 import pandas as pd
 import yaml
 
+from .risk_manager import RiskManager
 from .utils import Signal
 
 logger = logging.getLogger("sentinel.engine")
@@ -65,6 +66,17 @@ class Engine:
 
         self.delta_be = float(self.config.get("delta_be", 0.0015))
 
+        # Risk manager loads risk.yml for thresholds
+        self.risk_manager = RiskManager()
+        try:
+            bal = self.exchange.fetch_balance()
+            usdc = bal.get("USDC", {}).get("total") or 0
+        except Exception:  # pragma: no cover - network errors
+            usdc = 0
+        self.risk_manager.equity = float(usdc)
+        self.risk_manager.equity_high = self.risk_manager.equity
+        self.risk_manager.daily_start_equity = self.risk_manager.equity
+
     @staticmethod
     def _load_config(path: Path) -> dict:
         if not path.exists():
@@ -92,6 +104,12 @@ class Engine:
         pos["close_time"] = datetime.utcnow().isoformat()
         pos["close_price"] = price
         logger.info("%s closed at %.2f (trailing stop)", symbol, price)
+        # compute PnL and update risk manager
+        entry = float(pos.get("price", 0))
+        amount = float(pos.get("amount", 0))
+        side = pos.get("side", "long")
+        pnl = (price - entry) * amount if side == "long" else (entry - price) * amount
+        self.risk_manager.update_on_close(pnl)
         # remove lock once position is closed
         self.instrument_lock.pop(symbol, None)
 
@@ -115,6 +133,7 @@ class Engine:
         self,
         symbol: str,
         side: str,
+        amount: float,
         price: float,
         stop_distance: float | None,
         atr_value: float | None,
@@ -128,27 +147,17 @@ class Engine:
         side: str
             Desired position direction from the strategy, ``"long"`` or ``"short"``.
             It is converted to ``"buy"``/``"sell"`` for the exchange API.
+        amount: float
+            Quantity of the base asset to trade.
         price: float
-            Current market price used to size the position.
+            Current market price used by some rules.
         """
 
         # close any existing open position for this symbol
         self._close_position(symbol, price)
 
-        size_pct = float(self.config.get("position_size_pct", 0.01))
-        balance = self.exchange.fetch_balance()
-        base = symbol.split("/")[0]
-        quote = symbol.split("/")[1]
-        avail = balance.get(quote, {}).get("free")
-        if avail:
-            amount = (avail * size_pct) / price
-        else:
-            amount = 0
-
-        if not amount:
-            logger.warning(
-                "Skipping order for %s, computed amount is %s", symbol, amount
-            )
+        if amount <= 0:
+            logger.warning("Skipping order for %s, amount is %s", symbol, amount)
             return
 
         # CCXT expects 'buy' or 'sell'; map our signal sides accordingly
@@ -257,6 +266,7 @@ class Engine:
     def run_once(self, symbol: str, df: Optional[pd.DataFrame] = None) -> None:
         if df is None:
             df = self.fetch_ohlcv(symbol)
+        self.risk_manager.record_heartbeat()
 
         # compute shared indicators
         extras = {}
@@ -294,13 +304,13 @@ class Engine:
         chosen = None
         if len(long_names) >= 3 and has_top(long_names):
             chosen_sig = signals[long_names[0]]
-            chosen = ("long", chosen_sig)
+            chosen = ("long", long_names[0], chosen_sig)
         elif len(short_names) >= 3 and has_top(short_names):
             chosen_sig = signals[short_names[0]]
-            chosen = ("short", chosen_sig)
+            chosen = ("short", short_names[0], chosen_sig)
 
         if chosen:
-            side, ref_signal = chosen
+            side, strat_name, ref_signal = chosen
             logger.info("%s %s consensus %s", time, symbol, side.upper())
             atr_value = None
             if ref_signal.stop_distance is not None:
@@ -308,7 +318,25 @@ class Engine:
                     atr_value = float(extras["ATR_20"].iloc[-1])
                 elif "ATR_14" in extras:
                     atr_value = float(extras["ATR_14"].iloc[-1])
-            self._send_order(symbol, side, price, ref_signal.stop_distance, atr_value)
+            # risk manager check
+            open_value = sum(
+                p.get("amount", 0) * float(p.get("price", price))
+                for p in self.positions
+                if p.get("status") == "open"
+            )
+            ticker = self.exchange.fetch_ticker(symbol)
+            volume_24h = float(ticker.get("quoteVolume", 0))
+            allowed, amount = self.risk_manager.allows_new_position(
+                symbol,
+                price,
+                ref_signal.stop_distance or 0,
+                open_value,
+                strat_name,
+                atr_value or 0,
+                volume_24h,
+            )
+            if allowed:
+                self._send_order(symbol, side, amount, price, ref_signal.stop_distance, atr_value)
             self._save_positions()
 
 

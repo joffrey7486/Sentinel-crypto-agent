@@ -1,0 +1,9 @@
+risk_per_trade_pct: 0.01
+max_exposure_pct: 0.3
+daily_loss_limit_pct: 0.02
+max_drawdown_pct: 0.1
+loss_streak_limit: 4
+volatility_threshold: 0.007
+liquidity_pct: 0.0004
+block_hours: [23,0,1]
+heartbeat_timeout: 5
