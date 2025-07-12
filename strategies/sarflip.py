@@ -12,7 +12,17 @@ class SARFlip(BaseStrategy):
 
     @classmethod
     def generate_signal(cls, df: pd.DataFrame, extras: dict[str, pd.Series]):  # type: ignore
-        if len(df) < 3:
+        # Need sufficient history for volume comparison (2 days of 4h candles)
+        if len(df) < 12:
+            return Signal("flat")
+
+        volume = df["Volume"]
+        curr_vol = volume.iloc[-6:].sum()
+        prev_vol = volume.iloc[-12:-6].sum()
+        if prev_vol <= 0:
+            return Signal("flat")
+        vol_move = abs(curr_vol - prev_vol) / prev_vol * 100.0
+        if vol_move <= 2:
             return Signal("flat")
         psar = compute_psar(df)
         close = df["Close"]
@@ -26,5 +36,7 @@ class SARFlip(BaseStrategy):
         atr14 = extras.get("ATR_14")
         stop = None
         if atr14 is not None:
-            stop = 2.0 * float(atr14.iloc[-1])
+            psar_dist = abs(close.iloc[-1] - psar.iloc[-1])
+            atr_dist = 1.6 * float(atr14.iloc[-1])
+            stop = max(psar_dist, atr_dist)
         return Signal(action, stop_distance=stop)
