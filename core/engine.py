@@ -148,8 +148,6 @@ class Engine:
             "order": order,
             "status": "open",
         })
-        # release the lock once order has been executed
-        self.instrument_lock.pop(symbol, None)
 
     def fetch_ohlcv(self, symbol: str, limit: int = 2000) -> pd.DataFrame:
         logger.info("Fetching OHLCV for %s", symbol)
