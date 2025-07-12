@@ -80,6 +80,19 @@ class Engine:
             json.dump(self.positions, fh, indent=2)
 
     def _send_order(self, symbol: str, side: str, price: float) -> None:
+        """Send a market order to the exchange and persist it.
+
+        Parameters
+        ----------
+        symbol: str
+            Trading pair (e.g. ``"BTC/USDC"``).
+        side: str
+            Desired position direction from the strategy, ``"long"`` or ``"short"``.
+            It is converted to ``"buy"``/``"sell"`` for the exchange API.
+        price: float
+            Current market price used to size the position.
+        """
+
         size_pct = float(self.config.get("position_size_pct", 0.01))
         balance = self.exchange.fetch_balance()
         base = symbol.split("/")[0]
@@ -89,8 +102,12 @@ class Engine:
             amount = (avail * size_pct) / price
         else:
             amount = 0
+
+        # CCXT expects 'buy' or 'sell'; map our signal sides accordingly
+        order_side = "buy" if side == "long" else "sell"
+
         try:
-            order = self.exchange.create_order(symbol, "market", side, amount)
+            order = self.exchange.create_order(symbol, "market", order_side, amount)
         except Exception as exc:  # pragma: no cover - network errors
             logger.error("Order failed: %s", exc)
             order = {"error": str(exc)}
