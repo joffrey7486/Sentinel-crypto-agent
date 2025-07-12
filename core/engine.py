@@ -361,11 +361,26 @@ class Engine:
 
         chosen = None
         if len(long_names) >= 3 and has_top(long_names):
-            chosen_sig = signals[long_names[0]]
-            chosen = ("long", long_names[0], chosen_sig)
+            # Pick strategy with widest stop distance for determinism
+            pick = max(
+                long_names,
+                key=lambda n: (
+                    signals[n].stop_distance or 0,
+                    n,
+                ),
+            )
+            chosen_sig = signals[pick]
+            chosen = ("long", pick, chosen_sig)
         elif len(short_names) >= 3 and has_top(short_names):
-            chosen_sig = signals[short_names[0]]
-            chosen = ("short", short_names[0], chosen_sig)
+            pick = max(
+                short_names,
+                key=lambda n: (
+                    signals[n].stop_distance or 0,
+                    n,
+                ),
+            )
+            chosen_sig = signals[pick]
+            chosen = ("short", pick, chosen_sig)
 
         if chosen:
             side, strat_name, ref_signal = chosen
