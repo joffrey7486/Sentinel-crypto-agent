@@ -103,6 +103,10 @@ class Engine:
         else:
             amount = 0
 
+        if not amount:
+            logger.warning("Skipping order for %s, computed amount is %s", symbol, amount)
+            return
+
         # CCXT expects 'buy' or 'sell'; map our signal sides accordingly
         order_side = "buy" if side == "long" else "sell"
 
