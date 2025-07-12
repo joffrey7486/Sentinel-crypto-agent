@@ -1,8 +1,8 @@
 """EMA 20/100 crossover strategy (Run-the-Trend).
 
-Entry LONG when EMA20 crosses above EMA100 on the last closed candle.
-Entry SHORT when EMA20 crosses below EMA100.
-Trailing stop initial distance = min(4% of price, 2.5 * ATR20).
+Entry LONG when EMA20 crosses above EMA100 on the last closed candle and the
+EMA20 slope has been positive for the last three bars. Entry SHORT when EMA20
+crosses below EMA100. Trailing stop distance = 2 * ATR20.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ class EMA20_100(BaseStrategy):
         ema20 = compute_ema(close, 20)
         ema100 = compute_ema(close, 100)
         diff = ema20 - ema100
+        slope = ema20.diff()
 
         # Use last two closed candles to detect new crossing
         prev = diff.iloc[-2]
@@ -32,7 +33,9 @@ class EMA20_100(BaseStrategy):
 
         action = "flat"
         if prev < 0 < curr:
-            action = "long"
+            # only allow long if EMA20 slope positive for last 3 bars
+            if (slope.iloc[-1] > 0) and (slope.iloc[-2] > 0) and (slope.iloc[-3] > 0):
+                action = "long"
         elif prev > 0 > curr:
             action = "short"
 
@@ -44,5 +47,5 @@ class EMA20_100(BaseStrategy):
             return Signal("flat")
 
         price = float(close.iloc[-1])
-        stop_dist = min(0.04 * price, 2.5 * float(atr20.iloc[-1]))
+        stop_dist = 2.0 * float(atr20.iloc[-1])
         return Signal(action, stop_distance=stop_dist)
