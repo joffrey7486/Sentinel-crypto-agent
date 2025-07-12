@@ -15,3 +15,4 @@ strategies:
 fees: 0.0005  # 0.05%
 slippage: 0.0005
 position_size_pct: 0.01  # 1% capital
+delta_be: 0.0015  # 0.15% move to arm trailing stop
