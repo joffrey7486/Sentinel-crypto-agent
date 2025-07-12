@@ -80,9 +80,31 @@ class Engine:
     @staticmethod
     def _load_config(path: Path) -> dict:
         if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
+            default_config = {
+                "default_pair": "BTC/USDC",
+                "exchange": "binance",
+                "strategies": [
+                    "EMA20_100",
+                    "Donchian20",
+                    "BollingerSqueeze",
+                    "IchimokuKumo",
+                    "MACDZeroCross",
+                    "VWAPPullback",
+                    "KeltnerUpperRide",
+                    "SMA50Pullback",
+                    "SARFlip",
+                    "RSIDivergence",
+                ],
+                "fees": 0.0005,
+                "slippage": 0.0005,
+                "position_size_pct": 0.01,
+                "delta_be": 0.0015,
+            }
+            with open(path, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(default_config, fh)
+            return default_config
         with open(path, "r", encoding="utf-8") as fh:
-            config = yaml.safe_load(fh)
+            config = yaml.safe_load(fh) or {}
         return config
 
     def register_strategy(self, strategy_cls: Type[StrategyBase]) -> None:
