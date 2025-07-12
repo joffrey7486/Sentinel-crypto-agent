@@ -1,7 +1,8 @@
 """Donchian 20 Breakout strategy.
 
 Simplified MVP implementation: generates LONG when last close > 20-period high;
-SHORT when < 20-period low. Trailing stop distance = 2 * ATR20.
+SHORT when < 20-period low. Trades are only taken when ATR20 is at least 1% of
+price. Trailing stop distance = 2 * ATR20.
 """
 from __future__ import annotations
 
@@ -19,9 +20,13 @@ class Donchian20(BaseStrategy):
         if len(df) < 21:
             return Signal("flat")
 
+        close = df["Close"]
+        atr20 = extras.get("ATR_20")
+        if atr20 is None or atr20.iloc[-1] / close.iloc[-1] < 0.01:
+            return Signal("flat")
+
         high20 = df["High"].rolling(window=20).max()
         low20 = df["Low"].rolling(window=20).min()
-        close = df["Close"]
 
         last_close = close.iloc[-1]
         prev_close = close.iloc[-2]
@@ -34,8 +39,5 @@ class Donchian20(BaseStrategy):
         else:
             return Signal("flat")
 
-        atr20 = extras.get("ATR_20")
-        if atr20 is None:
-            return Signal("flat")
         stop_dist = 2.0 * float(atr20.iloc[-1])
         return Signal(action, stop_distance=stop_dist)
