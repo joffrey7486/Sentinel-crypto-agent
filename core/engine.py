@@ -91,6 +91,7 @@ class Engine:
         pos["status"] = "closed"
         pos["close_time"] = datetime.utcnow().isoformat()
         pos["close_price"] = price
+        logger.info("%s closed at %.2f (trailing stop)", symbol, price)
         # remove lock once position is closed
         self.instrument_lock.pop(symbol, None)
 
@@ -219,6 +220,11 @@ class Engine:
                     direction = 1 if side == "long" else -1
                     pos["stop_price"] = entry + direction * entry * self.delta_be
                     pos["armed"] = True
+                    logger.info(
+                        "%s trailing stop armed at %.2f",
+                        pos["symbol"],
+                        pos["stop_price"],
+                    )
                 continue
 
             atr_key = "ATR_20" if "ATR_20" in extras else "ATR_14"
@@ -229,12 +235,22 @@ class Engine:
 
             if side == "long":
                 candidate = high_prev - atr_mult * atr_value
-                pos["stop_price"] = max(pos["stop_price"], candidate)
+                old = pos["stop_price"]
+                pos["stop_price"] = max(old, candidate)
+                if pos["stop_price"] != old:
+                    logger.debug(
+                        "%s stop moved to %.2f", pos["symbol"], pos["stop_price"]
+                    )
                 if last_close <= pos["stop_price"]:
                     self._close_position(pos["symbol"], last_close)
             else:
                 candidate = low_prev + atr_mult * atr_value
-                pos["stop_price"] = min(pos["stop_price"], candidate)
+                old = pos["stop_price"]
+                pos["stop_price"] = min(old, candidate)
+                if pos["stop_price"] != old:
+                    logger.debug(
+                        "%s stop moved to %.2f", pos["symbol"], pos["stop_price"]
+                    )
                 if last_close >= pos["stop_price"]:
                     self._close_position(pos["symbol"], last_close)
 
