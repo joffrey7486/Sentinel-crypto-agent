@@ -5,7 +5,9 @@ import pytest
 @pytest.fixture
 def sample_ohlcv():
     index = pd.date_range("2021-01-01", periods=120, freq="H", tz="UTC")
-    close = pd.Series([100]*100 + [50]*18 + [300, 400], index=index)
+    # Use a strong rally on the last three candles so EMA20 slope is
+    # positive and crosses above EMA100
+    close = pd.Series([100]*100 + [50]*17 + [60, 300, 400], index=index)
     df = pd.DataFrame({
         "Open": close,
         "High": close + 1,
@@ -17,10 +19,14 @@ def sample_ohlcv():
 
 @pytest.fixture
 def donchian_df():
-    index = pd.date_range("2021-02-01", periods=21, freq="H", tz="UTC")
-    high = pd.Series(list(range(1,21)) + [22], index=index)
+    # At least 200 candles so Donchian20 can produce a valid signal. We
+    # create a simple upward trend where the last close breaks above the
+    # 20-period high and is also above the SMA200.
+    index = pd.date_range("2021-02-01", periods=201, freq="H", tz="UTC")
+    high = pd.Series(range(1, 202), index=index)
     low = high - 1
-    close = pd.Series(list(high[:-1] - 0.5) + [23], index=index)
+    close = pd.Series(high - 0.5, index=index)
+    close.iloc[-1] = high.iloc[-1] + 1  # breakout on the last candle
     df = pd.DataFrame({
         "Open": low,
         "High": high,
