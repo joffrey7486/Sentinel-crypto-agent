@@ -45,7 +45,17 @@ def test_engine_consensus_long(sample_ohlcv, monkeypatch):
     engine.register_strategy(StratC)
 
     orders = []
-    def fake_send_order(self, symbol, side, amount, price, stop_distance, atr_value):
+    def fake_send_order(
+        self,
+        symbol,
+        side,
+        amount,
+        price,
+        stop_distance,
+        atr_value,
+        trailing_mode,
+        strategy,
+    ):
         orders.append((side, amount))
     monkeypatch.setattr(Engine, "_send_order", fake_send_order)
     monkeypatch.setattr(engine.risk_manager, "allows_new_position", lambda *a, **k: (True, 1))
