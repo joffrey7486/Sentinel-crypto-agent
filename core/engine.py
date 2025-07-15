@@ -65,6 +65,7 @@ class Engine:
         self.positions: List[Dict[str, str]] = self._load_positions()
 
         self.delta_be = float(self.config.get("delta_be", 0.0015))
+        self.trailing_pct = float(self.config.get("trailing_pct", 0.008))
 
         # Risk manager loads risk.yml for thresholds
         self.risk_manager = RiskManager()
@@ -231,7 +232,7 @@ class Engine:
                 continue
 
             if side == "long":
-                candidate = high_prev * (1 - 0.008)
+                candidate = high_prev * (1 - self.trailing_pct)
                 old = pos["stop_price"]
                 pos["stop_price"] = max(old, candidate)
                 if pos["stop_price"] != old:
@@ -241,7 +242,7 @@ class Engine:
                 if last_close <= pos["stop_price"]:
                     self._close_position(pos["symbol"], last_close)
             else:
-                candidate = low_prev * (1 + 0.008)
+                candidate = low_prev * (1 + self.trailing_pct)
                 old = pos["stop_price"]
                 pos["stop_price"] = min(old, candidate)
                 if pos["stop_price"] != old:
