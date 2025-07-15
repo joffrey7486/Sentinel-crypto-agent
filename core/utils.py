@@ -171,11 +171,20 @@ def percent_distance(a: float, b: float) -> float:
 class Signal:
     """Standard signal object returned by generate_signal()."""
 
-    def __init__(self, action: str, stop_distance: float | None = None):
+    def __init__(
+        self,
+        action: str,
+        stop_distance: float | None = None,
+        trailing_mode: str = "atr",
+    ) -> None:
         if action not in {"long", "short", "flat"}:
             raise ValueError("action must be 'long', 'short', or 'flat'")
         self.action = action
         self.stop_distance = stop_distance  # absolute distance from price
+        self.trailing_mode = trailing_mode
 
     def __repr__(self) -> str:  # pragma: no cover
-        return f"Signal(action={self.action}, stop_distance={self.stop_distance})"
+        return (
+            f"Signal(action={self.action}, stop_distance={self.stop_distance}, "
+            f"trailing_mode={self.trailing_mode})"
+        )

@@ -1,4 +1,8 @@
 risk_per_trade: 0.01
+fees: 0.0005
+slippage: 0.0005
+risk_pct: 0.01
+atr_length: 14
 max_exposure_pct: 0.3
 daily_loss_limit: 0.02
 max_drawdown: 0.1

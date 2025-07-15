@@ -80,9 +80,31 @@ class Engine:
     @staticmethod
     def _load_config(path: Path) -> dict:
         if not path.exists():
-            raise FileNotFoundError(f"Config file not found: {path}")
+            default_config = {
+                "default_pair": "BTC/USDC",
+                "exchange": "binance",
+                "strategies": [
+                    "EMA20_100",
+                    "Donchian20",
+                    "BollingerSqueeze",
+                    "IchimokuKumo",
+                    "MACDZeroCross",
+                    "VWAPPullback",
+                    "KeltnerUpperRide",
+                    "SMA50Pullback",
+                    "SARFlip",
+                    "RSIDivergence",
+                ],
+                "fees": 0.0005,
+                "slippage": 0.0005,
+                "position_size_pct": 0.01,
+                "delta_be": 0.0015,
+            }
+            with open(path, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(default_config, fh)
+            return default_config
         with open(path, "r", encoding="utf-8") as fh:
-            config = yaml.safe_load(fh)
+            config = yaml.safe_load(fh) or {}
         return config
 
     def register_strategy(self, strategy_cls: Type[StrategyBase]) -> None:
@@ -122,6 +144,8 @@ class Engine:
                     pos.setdefault("stop_price", None)
                     pos.setdefault("atr_multiplier", None)
                     pos.setdefault("armed", False)
+                    pos.setdefault("trail_mode", "atr")
+                    pos.setdefault("strategy", None)
                 return data
         return []
 
@@ -137,6 +161,8 @@ class Engine:
         price: float,
         stop_distance: float | None,
         atr_value: float | None,
+        trailing_mode: str = "atr",
+        strategy: str | None = None,
     ) -> None:
         """Send a market order to the exchange and persist it.
 
@@ -189,6 +215,8 @@ class Engine:
                 "stop_price": stop_price,
                 "atr_multiplier": atr_mult,
                 "armed": False,
+                "trail_mode": trailing_mode,
+                "strategy": strategy,
             }
         )
 
@@ -217,6 +245,7 @@ class Engine:
                 continue
             stop = pos.get("stop_price")
             atr_mult = pos.get("atr_multiplier")
+            trail_mode = pos.get("trail_mode", "atr")
             side = pos["side"]
             entry = float(pos["price"])
             armed = pos.get("armed", False)
@@ -241,6 +270,33 @@ class Engine:
             if atr_series is None:
                 continue
             atr_value = float(atr_series.iloc[-2])
+
+            if trail_mode == "kijun":
+                kijun_series = extras.get("Kijun")
+                if kijun_series is None:
+                    continue
+                kijun = float(kijun_series.iloc[-2])
+                if side == "long":
+                    candidate = kijun + 0.5 * atr_value
+                    old = pos["stop_price"]
+                    pos["stop_price"] = max(old, candidate)
+                    if pos["stop_price"] != old:
+                        logger.debug(
+                            "%s stop moved to %.2f", pos["symbol"], pos["stop_price"]
+                        )
+                    if last_close <= pos["stop_price"]:
+                        self._close_position(pos["symbol"], last_close)
+                else:
+                    candidate = kijun - 0.5 * atr_value
+                    old = pos["stop_price"]
+                    pos["stop_price"] = min(old, candidate)
+                    if pos["stop_price"] != old:
+                        logger.debug(
+                            "%s stop moved to %.2f", pos["symbol"], pos["stop_price"]
+                        )
+                    if last_close >= pos["stop_price"]:
+                        self._close_position(pos["symbol"], last_close)
+                continue
 
             if side == "long":
                 candidate = high_prev - atr_mult * atr_value
@@ -271,10 +327,12 @@ class Engine:
         # compute shared indicators
         extras = {}
         # Example: compute ATR 20 for all strategies needing it
-        from .utils import compute_atr
+        from .utils import compute_atr, compute_ichimoku
 
         extras["ATR_20"] = compute_atr(df, 20)
         extras["ATR_14"] = compute_atr(df, 14)
+        ich = compute_ichimoku(df)
+        extras["Kijun"] = ich["kijun"]
 
         last_candle = df.iloc[-1]
         price = float(last_candle["Close"])
@@ -303,11 +361,26 @@ class Engine:
 
         chosen = None
         if len(long_names) >= 3 and has_top(long_names):
-            chosen_sig = signals[long_names[0]]
-            chosen = ("long", long_names[0], chosen_sig)
+            # Pick strategy with widest stop distance for determinism
+            pick = max(
+                long_names,
+                key=lambda n: (
+                    signals[n].stop_distance or 0,
+                    n,
+                ),
+            )
+            chosen_sig = signals[pick]
+            chosen = ("long", pick, chosen_sig)
         elif len(short_names) >= 3 and has_top(short_names):
-            chosen_sig = signals[short_names[0]]
-            chosen = ("short", short_names[0], chosen_sig)
+            pick = max(
+                short_names,
+                key=lambda n: (
+                    signals[n].stop_distance or 0,
+                    n,
+                ),
+            )
+            chosen_sig = signals[pick]
+            chosen = ("short", pick, chosen_sig)
 
         if chosen:
             side, strat_name, ref_signal = chosen
@@ -336,7 +409,16 @@ class Engine:
                 volume_24h,
             )
             if allowed:
-                self._send_order(symbol, side, amount, price, ref_signal.stop_distance, atr_value)
+                self._send_order(
+                    symbol,
+                    side,
+                    amount,
+                    price,
+                    ref_signal.stop_distance,
+                    atr_value,
+                    ref_signal.trailing_mode,
+                    strat_name,
+                )
             self._save_positions()
 
 

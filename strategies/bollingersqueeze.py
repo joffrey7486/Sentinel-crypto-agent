@@ -1,4 +1,9 @@
-"""Bollinger Squeeze Break strategy."""
+"""Bollinger Squeeze Break strategy.
+
+Entry is triggered when price exits a Bollinger Band squeeze and the
+Bollinger Band width relative to price is below 2%. The resulting
+position uses a trailing stop of ``1.8 * ATR14``.
+"""
 from __future__ import annotations
 
 import pandas as pd
@@ -28,15 +33,16 @@ class BollingerSqueeze(BaseStrategy):
 
         prev_squeeze = width_bb.iloc[-2] < width_kc.iloc[-2]
         squeeze = width_bb.iloc[-1] < width_kc.iloc[-1]
+        width_ratio = width_bb.iloc[-1] / close.iloc[-1]
         action = "flat"
-        if prev_squeeze and not squeeze:
+        if prev_squeeze and not squeeze and width_ratio < 0.02:
             if close.iloc[-1] > bb_upper.iloc[-1]:
                 action = "long"
             elif close.iloc[-1] < bb_lower.iloc[-1]:
                 action = "short"
 
-        atr20 = extras.get("ATR_20")
+        atr14 = extras.get("ATR_14")
         stop = None
-        if atr20 is not None:
-            stop = 2.0 * float(atr20.iloc[-1])
+        if atr14 is not None:
+            stop = 1.8 * float(atr14.iloc[-1])
         return Signal(action, stop_distance=stop)
