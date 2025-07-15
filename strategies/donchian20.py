@@ -2,7 +2,7 @@
 
 Simplified MVP implementation: generates LONG when last close > 20-period high;
 SHORT when < 20-period low. Trades are only taken when ATR20 is at least 1% of
-price. Trailing stop distance = 2 * ATR20.
+price (ATR20/Close >= 0.01). Trailing stop distance = 2 * ATR20.
 """
 from __future__ import annotations
 
