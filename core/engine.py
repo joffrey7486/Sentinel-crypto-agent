@@ -46,6 +46,7 @@ class Engine:
         config_path: Path = Path("config.yaml"),
         exchange_id: str = "binance",
         timeframe: str = "4h",
+        paper: bool = False,
     ) -> None:
         self.config = self._load_config(config_path)
         api_key = os.getenv("API_KEY")
@@ -59,6 +60,7 @@ class Engine:
         )
         self.exchange.load_markets()
         self.timeframe = timeframe
+        self.paper = paper
         self.strategies: List[Type[StrategyBase]] = []
         self.instrument_lock: Dict[str, str] = {}  # pair -> strategy_name
         self.positions_path = Path("positions.json")
@@ -131,6 +133,7 @@ class Engine:
         amount = float(pos.get("amount", 0))
         side = pos.get("side", "long")
         pnl = (price - entry) * amount if side == "long" else (entry - price) * amount
+        pos["pnl"] = pnl
         self.risk_manager.update_on_close(pnl)
         # remove lock once position is closed
         self.instrument_lock.pop(symbol, None)
@@ -146,6 +149,9 @@ class Engine:
                     pos.setdefault("armed", False)
                     pos.setdefault("trail_mode", "atr")
                     pos.setdefault("strategy", None)
+                    pos.setdefault("stop_pct", None)
+                    pos.setdefault("signal_source", pos.get("strategy"))
+                    pos.setdefault("pnl", None)
                 return data
         return []
 
@@ -189,11 +195,14 @@ class Engine:
         # CCXT expects 'buy' or 'sell'; map our signal sides accordingly
         order_side = "buy" if side == "long" else "sell"
 
-        try:
-            order = self.exchange.create_order(symbol, "market", order_side, amount)
-        except Exception as exc:  # pragma: no cover - network errors
-            logger.error("Order failed: %s", exc)
-            order = {"error": str(exc)}
+        if self.paper:
+            order = {"side": order_side, "amount": amount, "paper": True}
+        else:
+            try:
+                order = self.exchange.create_order(symbol, "market", order_side, amount)
+            except Exception as exc:  # pragma: no cover - network errors
+                logger.error("Order failed: %s", exc)
+                order = {"error": str(exc)}
 
         stop_price = None
         atr_mult = None
@@ -202,7 +211,8 @@ class Engine:
             stop_price = price - direction * stop_distance
             if atr_value:
                 atr_mult = stop_distance / atr_value
-
+        stop_pct = stop_distance / price * 100 if stop_distance is not None else None
+        
         self.positions.append(
             {
                 "time": datetime.utcnow().isoformat(),
@@ -217,6 +227,8 @@ class Engine:
                 "armed": False,
                 "trail_mode": trailing_mode,
                 "strategy": strategy,
+                "stop_pct": stop_pct,
+                "signal_source": strategy,
             }
         )
 
@@ -420,5 +432,36 @@ class Engine:
                     strat_name,
                 )
             self._save_positions()
+
+    def export_csv(self, path: Path = Path("trades.csv")) -> Dict[str, float]:
+        """Export closed positions to CSV and return KPIs (CAGR, MDD)."""
+        if not self.positions:
+            return {"CAGR": 0.0, "MDD": 0.0}
+        df = pd.DataFrame(self.positions)
+        if df.empty:
+            return {"CAGR": 0.0, "MDD": 0.0}
+        df_closed = df[df["status"] == "closed"].copy()
+        if df_closed.empty:
+            return {"CAGR": 0.0, "MDD": 0.0}
+        df_closed["time"] = pd.to_datetime(df_closed["time"])
+        df_closed["close_time"] = pd.to_datetime(df_closed["close_time"])
+        if "pnl" not in df_closed:
+            df_closed["pnl"] = (
+                df_closed["close_price"] - df_closed["price"]
+            ) * df_closed["amount"]
+        df_closed.to_csv(path, index=False)
+
+        start_equity = float(self.risk_manager.config.get("starting_equity", 0))
+        equity_curve = start_equity + df_closed["pnl"].cumsum()
+        years = (
+            (df_closed["close_time"].iloc[-1] - df_closed["time"].iloc[0]).days
+            / 365.0
+        ) or 1.0
+        final = equity_curve.iloc[-1]
+        cagr = (final / start_equity) ** (1 / years) - 1 if start_equity else 0.0
+        running_max = equity_curve.cummax()
+        drawdown = (equity_curve - running_max) / running_max
+        mdd = float(drawdown.min()) if not drawdown.empty else 0.0
+        return {"CAGR": float(cagr), "MDD": mdd}
 
 
