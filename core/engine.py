@@ -422,25 +422,3 @@ class Engine:
             self._save_positions()
 
 
-if __name__ == "__main__":  # pragma: no cover
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--pair", required=True, help="Symbol pair like BTC/USDC")
-    parser.add_argument("--once", action="store_true", help="Run once and exit")
-    args = parser.parse_args()
-
-    eng = Engine()
-    # TODO: register strategy classes
-    # from strategies.ema20_100 import EMA20_100
-    # eng.register_strategy(EMA20_100)
-
-    if args.once:
-        eng.run_once(args.pair)
-    else:
-        # Simplistic loop every 4h
-        while True:
-            now = datetime.now(timezone.utc)
-            if now.hour % 4 == 0 and now.minute < 2:
-                eng.run_once(args.pair)
-            time.sleep(60)
