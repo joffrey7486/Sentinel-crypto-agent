@@ -1,8 +1,3 @@
-from pathlib import Path
-import sys
-
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
 import types
 from core.engine import Engine, StrategyBase
 from core.utils import Signal

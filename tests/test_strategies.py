@@ -1,8 +1,3 @@
-from pathlib import Path
-import sys
-
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
 from core.utils import compute_atr
 from strategies.ema20_100 import EMA20_100
 from strategies.donchian20 import Donchian20

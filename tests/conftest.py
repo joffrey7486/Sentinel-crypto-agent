@@ -1,6 +1,11 @@
+import site
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import pytest
+
+# Ensure project root is on the Python path for imports
+site.addsitedir(str(Path(__file__).resolve().parents[1]))
 
 @pytest.fixture
 def sample_ohlcv():

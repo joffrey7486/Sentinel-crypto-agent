@@ -1,8 +1,3 @@
-from pathlib import Path
-import sys
-
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
 import pandas as pd
 import numpy as np
 from core.utils import (
