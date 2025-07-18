@@ -132,7 +132,6 @@ class RiskManager:
     ) -> Tuple[bool, float]:
         """Return (allowed, size) for a new position."""
         amount = self.risk_per_trade(stop_distance)
-        new_value = amount * stop_distance
         if not self.exposure_ok(open_value, price * amount):
             self.log_event(f"Exposure cap block on {symbol}")
             return False, 0.0
