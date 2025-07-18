@@ -24,9 +24,12 @@ from .utils import Signal
 
 logger = logging.getLogger("sentinel.engine")
 logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-logger.addHandler(handler)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    )
+    logger.addHandler(handler)
 
 
 class StrategyBase:
