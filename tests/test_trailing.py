@@ -26,7 +26,7 @@ def test_trailing_stop_never_decreases_long(monkeypatch):
             "Close": [1, 2, 1.8],
             "Volume": [1, 1, 1],
         },
-        index=pd.date_range("2024-01-01", periods=3, freq="4H", tz="UTC"),
+        index=pd.date_range("2024-01-01", periods=3, freq="4h", tz="UTC"),
     )
     eng.positions = [
         {
@@ -62,7 +62,7 @@ def test_trailing_stop_never_increases_short(monkeypatch):
             "Close": [3, 2, 1.2],
             "Volume": [1, 1, 1],
         },
-        index=pd.date_range("2024-01-01", periods=3, freq="4H", tz="UTC"),
+        index=pd.date_range("2024-01-01", periods=3, freq="4h", tz="UTC"),
     )
     eng.positions = [
         {

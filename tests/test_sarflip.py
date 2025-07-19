@@ -6,7 +6,7 @@ from core.utils import compute_psar
 
 
 def _make_df(volumes):
-    idx = pd.date_range("2024-01-01", periods=len(volumes), freq="4H")
+    idx = pd.date_range("2024-01-01", periods=len(volumes), freq="4h")
     data = {
         "Open": np.arange(len(volumes), dtype=float),
         "High": np.arange(len(volumes), dtype=float) + 1,
