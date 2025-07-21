@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sentinel Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-sm p-4">
+  <div class="flex items-center mb-4 space-x-2">
+    <span id="status-indicator" class="w-3 h-3 rounded-full bg-red-500"></span>
+    <span id="utc-time" class="font-mono text-xs"></span>
+  </div>
+  <table id="positions" class="min-w-full border text-left mb-4">
+    <thead class="bg-gray-200">
+      <tr>
+        <th class="px-2">Pair</th>
+        <th class="px-2">Side</th>
+        <th class="px-2">Qty</th>
+        <th class="px-2">Entry</th>
+        <th class="px-2">Stop</th>
+        <th class="px-2">PnL</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div id="logs" class="h-64 overflow-y-scroll bg-black text-white p-2 font-mono text-xs"></div>
+  <script>
+    async function refresh() {
+      const st = await fetch('/status').then(r => r.json());
+      const ind = document.getElementById('status-indicator');
+      ind.className = 'w-3 h-3 rounded-full ' + (st.alive ? 'bg-green-500' : 'bg-red-500');
+      document.getElementById('utc-time').textContent = new Date().toISOString().slice(0,19)+'Z';
+      const pos = await fetch('/positions').then(r => r.json());
+      const tbody = document.querySelector('#positions tbody');
+      tbody.innerHTML = '';
+      pos.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="px-2">${p.symbol}</td>`+
+                       `<td class="px-2">${p.side}</td>`+
+                       `<td class="px-2">${p.amount}</td>`+
+                       `<td class="px-2">${p.price}</td>`+
+                       `<td class="px-2">${p.stop_price ?? ''}</td>`+
+                       `<td class="px-2">${p.pnl ?? ''}</td>`;
+        tbody.appendChild(tr);
+      });
+      const logs = await fetch('/logs/tail?n=50').then(r => r.json());
+      const div = document.getElementById('logs');
+      div.innerHTML = logs.lines.join('<br>');
+      div.scrollTop = div.scrollHeight;
+    }
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

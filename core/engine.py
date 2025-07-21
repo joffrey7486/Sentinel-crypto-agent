@@ -73,6 +73,7 @@ class Engine:
 
         # Risk manager loads risk.yml for thresholds
         self.risk_manager = RiskManager()
+        self.running = True
         try:
             bal = self.exchange.fetch_balance()
             usdc = bal.get("USDC", {}).get("total") or 0
@@ -114,6 +115,10 @@ class Engine:
 
     def register_strategy(self, strategy_cls: Type[StrategyBase]) -> None:
         self.strategies.append(strategy_cls)
+
+    def stop(self) -> None:
+        """Signal the engine loop to halt."""
+        self.running = False
 
     def _get_open_position(self, symbol: str) -> Optional[Dict[str, str]]:
         """Return the last open position for the given symbol, if any."""
