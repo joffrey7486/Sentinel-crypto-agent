@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 import time as time_mod
 
 from core.engine import Engine
+from core.api import init_api
+import threading
+import uvicorn
+import webview
 from strategies import (
     EMA20_100,
     Donchian20,
@@ -43,14 +47,35 @@ def main() -> None:  # pragma: no cover
         eng.run_once(args.pair)
         return
 
-    print("[Sentinel] Running live mode. Evaluating every 4H close UTC…")
-    while True:
-        now = datetime.now(timezone.utc)
-        if now.hour % 4 == 0 and now.minute < 3:
-            eng.run_once(args.pair)
-            time_mod.sleep(60 * 180)  # wait 3h to avoid duplicate run
-        else:
-            time_mod.sleep(60)
+    app = init_api(eng)
+
+    def api_runner():  # pragma: no cover - server loop
+        uvicorn.run(app, port=8080, log_level="warning")
+
+    threading.Thread(target=api_runner, daemon=True).start()
+
+    def engine_loop():
+        while eng.running:
+            now = datetime.now(timezone.utc)
+            if now.hour % 4 == 0 and now.minute < 3:
+                eng.run_once(args.pair)
+                for _ in range(180):
+                    if not eng.running:
+                        return
+                    time_mod.sleep(60)
+            else:
+                time_mod.sleep(60)
+
+    threading.Thread(target=engine_loop, daemon=True).start()
+
+    window = webview.create_window(
+        "Sentinel Dashboard",
+        "http://127.0.0.1:8080/dashboard.html",
+        width=900,
+        height=700,
+    )
+    window.events.closed += lambda *a: eng.stop()
+    webview.start()
 
 
 if __name__ == "__main__":
